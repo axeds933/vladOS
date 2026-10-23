@@ -15,7 +15,7 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * Settings changed on the TV itself (Free My TV > Settings). config.properties only gives the first
+ * Settings changed on the TV itself (vladOS > Settings). config.properties only gives the first
  * values; anything the user changes here wins. Read from the :home process (home screen, screensaver, settings).
  */
 final class Prefs {
@@ -119,8 +119,12 @@ final class Prefs {
     static boolean quotes() { return sp().getBoolean("quotes", Config.SHOW_CRYPTO); }
     static void setQuotes(boolean on) { put("quotes", on); }
 
-    static boolean coin(int i) { return sp().getBoolean("coin" + i, true); }
-    static void setCoin(int i, boolean on) { put("coin" + i, on); }
+    /** Local change: what the j-th quote place shows, as an index in HomeData.COINS (-1 = nothing); first the first four. */
+    static int slot(int j) { return sp().getInt("slot" + j, j < HomeData.DEFAULT_ON ? j : -1); }
+    static void setSlot(int j, int coin) {
+        sp().edit().putInt("slot" + j, coin).apply();
+        version++;
+    }
 
     // MARK: - Shelf
 

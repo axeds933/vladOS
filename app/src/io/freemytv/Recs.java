@@ -46,6 +46,7 @@ final class Recs {
         int id;
         String kind;            // "movie" or "tv"
         String title, backdrop, meta = "", app, pkg;
+        String poster;          // Kinopoisk's vertical poster (whole address), for the tall cards; or null
         String link;            // opens the title in its app (looked up with Watchmode), or null: the app's home
         boolean detailed;
     }
@@ -59,7 +60,7 @@ final class Recs {
     private static final int ANIMATION = 16;
     private static final long LIST_EVERY = 6 * 3600_000L;
     /** Bump when what is saved for each title changes (the saved list is discarded and fetched again). */
-    private static final int CACHE_VERSION = 3;
+    private static final int CACHE_VERSION = 5;
     private static final int MANHA = 0, TARDE = 1, NOITE = 2;
     /** Service name on TMDB (part of the name, lowercase) → TV app (HomeApps key, package). */
     private static final String[][] SERVICES = {
@@ -78,6 +79,15 @@ final class Recs {
         {"okko", "okko", "ru.more.play"},
         {"crunchyroll", "crunchyroll", "com.crunchyroll.crunchyroid"},
         {"oneplay", "oneplay", "net.cme.voyo.cz.tvapp"},    // Czechia: Voyo and O2 TV became Oneplay, same app
+        // Russia (Kinopoisk's watchability names, in Latin or Cyrillic)
+        {"kinopoisk", "kinopoisk", "ru.kinopoisk.tv"},
+        {"кинопоиск", "kinopoisk", "ru.kinopoisk.tv"},
+        {"premier", "premier", "gpm.tnt_premier"},
+        {"премьер", "premier", "gpm.tnt_premier"},
+        {"amediateka", "amediateka", "ru.amediateka"},
+        {"амедиатека", "amediateka", "ru.amediateka"},
+        {"wink", "wink", "ru.rt.video.app.tv"},
+        {"start", "start", "ru.start.androidmobile"},
     };
     private static final Map<String, String> SERVICE_NAME = new HashMap<>();
     static {
@@ -94,6 +104,11 @@ final class Recs {
         SERVICE_NAME.put("okko", "Okko");
         SERVICE_NAME.put("crunchyroll", "Crunchyroll");
         SERVICE_NAME.put("oneplay", "Oneplay");
+        SERVICE_NAME.put("kinopoisk", "Кинопоиск");
+        SERVICE_NAME.put("premier", "PREMIER");
+        SERVICE_NAME.put("amediateka", "Амедиатека");
+        SERVICE_NAME.put("wink", "Wink");
+        SERVICE_NAME.put("start", "START");
     }
     /** Country for "what streams where" (config.properties "tmdb_region", e.g. US, GB, BR). */
     static final String REGION = Config.TMDB_REGION.trim().toUpperCase(Locale.ROOT);
@@ -143,7 +158,12 @@ final class Recs {
     void removeListener(Listener l) { listeners.remove(l); }
 
     static boolean hasKey(Context c) {
-        return !Config.TMDB_KEY.trim().isEmpty();
+        return !Config.TMDB_KEY.trim().isEmpty() || kinopoisk();
+    }
+
+    /** A poiskkino.dev key (config.properties "kinopoisk_key"): Kinopoisk's catalog instead of TMDB (reachable from Russia). */
+    static boolean kinopoisk() {
+        return !Config.KINOPOISK_KEY.trim().isEmpty();
     }
 
     /** Last fetch, for the settings screen: {count, error, at}. Written by the home screen (another process). */
@@ -242,7 +262,8 @@ final class Recs {
     }
 
     private File imageFile(Pick p) {
-        return new File(new File(context.getCacheDir(), "recs"), p.backdrop.replace("/", ""));
+        String name = p.backdrop.startsWith("http") ? "kp" + Integer.toHexString(p.backdrop.hashCode()) : p.backdrop.replace("/", "");
+        return new File(new File(context.getCacheDir(), "recs"), name);
     }
 
     /** With a key: fetches the list if stale or the time of day (morning/afternoon/night) changed; then the details. */
@@ -390,6 +411,10 @@ final class Recs {
         boolean any = false;
         for (String[] s : SERVICES) any |= installed(s[2]);
         if (!any) throw new IOException(NO_KNOWN_APPS);
+        if (kinopoisk()) {
+            fetchListKinopoisk(p);
+            return;
+        }
         // The services the TV has, by their TMDB ids in your region.
         Map<Integer, String[]> services = new HashMap<>();
         JSONArray providers = get("/watch/providers/movie?language=" + lang() + "&watch_region=" + REGION).getJSONArray("results");
@@ -439,6 +464,99 @@ final class Recs {
         period = p;
         listAt = System.currentTimeMillis();
         listLanguage = Ui.language;
+    }
+
+    // MARK: - Kinopoisk (poiskkino.dev): one request for movies and one for shows, with the details already in them
+
+    private static final String KINOPOISK_API = "https://api.poiskkino.dev/v1.5";
+
+    private void fetchListKinopoisk(int p) throws Exception {
+        int year = Calendar.getInstance().get(Calendar.YEAR);
+        // The most voted titles of the past two years (movies) and three (shows) with a backdrop and a service to watch them on.
+        String common = "&limit=100&sortField=votes.kp&sortType=-1&notNullFields=backdrop.url&notNullFields=watchability.items.name";
+        // watchability only comes when asked for, and then only the fields asked for come
+        for (String f : new String[] {"id", "name", "enName", "alternativeName", "type", "isSeries", "movieLength", "genres",
+                "backdrop", "poster", "seasonsInfo", "watchability"}) common += "&selectFields=" + f;
+        String movieTypes = "&type=movie" + (Config.HIDE_ANIMATION ? "" : "&type=cartoon");
+        String showTypes = "&isSeries=true" + (Config.HIDE_ANIMATION ? "&type=tv-series" : "");
+        JSONArray movies = kinopoiskGet("/movie?year=" + (year - 1) + "-" + year + movieTypes + common).getJSONArray("docs");
+        JSONArray shows = kinopoiskGet("/movie?year=" + (year - 2) + "-" + year + showTypes + common).getJSONArray("docs");
+        List<Pick> newMovies = new ArrayList<>(), newShows = new ArrayList<>();
+        for (int i = 0; i < movies.length(); i++) addKinopoisk(newMovies, movies.getJSONObject(i));
+        for (int i = 0; i < shows.length(); i++) addKinopoisk(newShows, shows.getJSONObject(i));
+        List<Pick> list = new ArrayList<>();
+        alternate(list, new java.util.HashSet<>(), newMovies, newShows, 24);
+        if (list.isEmpty()) throw new IOException(NO_APPS);
+        picks = list;
+        period = p;
+        listAt = System.currentTimeMillis();
+        listLanguage = Ui.language;
+    }
+
+    /** Adds the title if one of the services it's on is installed: the details come with it (no second request). */
+    private void addKinopoisk(List<Pick> list, JSONObject o) {
+        JSONObject backdrop = o.optJSONObject("backdrop");
+        String image = backdrop == null ? "" : backdrop.optString("url", "");
+        if (!image.startsWith("http")) return;
+        String type = o.optString("type");
+        if (Config.HIDE_ANIMATION && (type.equals("cartoon") || type.equals("anime") || type.equals("animated-series"))) return;
+        Pick p = new Pick();
+        JSONObject watch = o.optJSONObject("watchability");
+        JSONArray items = watch == null ? null : watch.optJSONArray("items");
+        for (int i = 0; items != null && i < items.length() && p.app == null; i++) {
+            JSONObject item = items.optJSONObject(i);
+            String[] s = item == null ? null : service(item.optString("name"));
+            if (s != null && installed(s[2])) {
+                p.app = s[1];
+                p.pkg = s[2];
+                String url = item.optString("url", "");
+                p.link = url.startsWith("https://") ? url : null;
+            }
+        }
+        if (p.app == null) return;
+        p.id = o.optInt("id");
+        p.kind = o.optBoolean("isSeries") ? "tv" : "movie";
+        String ru = o.optString("name", ""), en = o.optString("enName", ""), alt = o.optString("alternativeName", "");
+        if ("null".equals(en)) en = "";
+        if ("null".equals(alt)) alt = "";
+        p.title = Ui.language.startsWith("ru") || (en.isEmpty() && alt.isEmpty()) ? ru : !en.isEmpty() ? en : alt;
+        if (p.title.isEmpty() || "null".equals(p.title)) return;
+        p.backdrop = image;
+        JSONObject poster = o.optJSONObject("poster");
+        String posterUrl = poster == null ? "" : poster.optString("url", "");
+        p.poster = posterUrl.startsWith("http") ? posterUrl : null;
+        List<String> parts = new ArrayList<>();
+        if (p.kind.equals("tv")) parts.add(Ui.tr("Series"));
+        JSONArray genres = o.optJSONArray("genres");
+        String genre = genres != null && genres.length() > 0 ? genres.optJSONObject(0).optString("name", "") : "";
+        if (!genre.isEmpty()) parts.add(genre.substring(0, 1).toUpperCase(Locale.ROOT) + genre.substring(1));
+        if (p.kind.equals("movie")) {
+            int minutes = o.optInt("movieLength");
+            if (minutes > 0) parts.add(minutes >= 60 ? Ui.trf("{h}h {m}m", "h", minutes / 60, "m", minutes % 60) : Ui.trf("{m}m", "m", minutes));
+        } else {
+            JSONArray seasons = o.optJSONArray("seasonsInfo");
+            if (seasons != null && seasons.length() > 0) parts.add(Ui.plural("plural|one:{n} season|other:{n} seasons", seasons.length()));
+        }
+        parts.add(SERVICE_NAME.get(p.app));
+        p.meta = String.join(" · ", parts);
+        p.detailed = true;
+        list.add(p);
+    }
+
+    private static JSONObject kinopoiskGet(String path) throws IOException, org.json.JSONException {
+        HttpURLConnection c = (HttpURLConnection) new URL(KINOPOISK_API + path).openConnection();
+        c.setConnectTimeout(8000);
+        c.setReadTimeout(20000);
+        c.setRequestProperty("Accept", "application/json");
+        c.setRequestProperty("X-API-KEY", Config.KINOPOISK_KEY.trim());
+        try {
+            int code = c.getResponseCode();
+            if (code == 401 || code == 403) throw new IOException("Kinopoisk rejected the key (HTTP " + code + ")");
+            if (code != 200) throw new IOException("Kinopoisk returned HTTP " + code);
+            return new JSONObject(read(c.getInputStream()));
+        } finally {
+            c.disconnect();
+        }
     }
 
     /** Language of titles and genres (TMDB's "fr-FR", "zh-CN"…); the services come from the region. */
@@ -603,7 +721,8 @@ final class Recs {
     }
 
     private long sourceStamp() {
-        long stamp = (Config.TMDB_KEY.hashCode() * 31L + REGION.hashCode()) * 31L + (Config.HIDE_ANIMATION ? 1 : 0);
+        long stamp = ((Config.TMDB_KEY.hashCode() * 31L + Config.KINOPOISK_KEY.hashCode()) * 31L + REGION.hashCode()) * 31L
+                + (Config.HIDE_ANIMATION ? 1 : 0);
         for (String[] service : SERVICES) stamp = stamp * 31L + (installed(service[2]) ? service[2].hashCode() : 0);
         return stamp;
     }
@@ -703,12 +822,42 @@ final class Recs {
     // MARK: - Images (TMDB originals on disk, up to 24 so the whole list fits; this hour's kept ready in memory)
 
     private void download(Pick p) throws IOException {
-        File f = imageFile(p);
+        // Kinopoisk's are whole addresses
+        fetch(p.backdrop.startsWith("http") ? p.backdrop : IMAGES + p.backdrop, imageFile(p));
+    }
+
+    /** Kinopoisk's vertical poster, for the tall cards (the photo's middle is often just a shoulder). */
+    private File posterFile(Pick p) {
+        return new File(new File(context.getCacheDir(), "recs"), "kpp" + Integer.toHexString(p.poster.hashCode()));
+    }
+
+    /** The poster at about the tall card's width, or null (no poster, or it won't download: the photo is cropped instead). */
+    private Bitmap poster(Pick p) {
+        if (p.poster == null) return null;
+        File f = posterFile(p);
+        try {
+            fetch(p.poster, f);
+            BitmapFactory.Options bounds = new BitmapFactory.Options();
+            bounds.inJustDecodeBounds = true;
+            BitmapFactory.decodeFile(f.getPath(), bounds);
+            BitmapFactory.Options opts = new BitmapFactory.Options();
+            opts.inSampleSize = 1;
+            while (bounds.outWidth / (opts.inSampleSize * 2) >= Backdrop.TALL_W) opts.inSampleSize *= 2;
+            return BitmapFactory.decodeFile(f.getPath(), opts);
+        } catch (IOException | RuntimeException | OutOfMemoryError e) {
+            //noinspection ResultOfMethodCallIgnored
+            f.delete();
+            AppLog.w("recommendation poster: " + e.getMessage());
+            return null;
+        }
+    }
+
+    private void fetch(String url, File f) throws IOException {
         if (f.exists()) return;
         //noinspection ResultOfMethodCallIgnored
         f.getParentFile().mkdirs();
         File part = new File(f.getPath() + ".part");
-        HttpURLConnection c = (HttpURLConnection) new URL(IMAGES + p.backdrop).openConnection();
+        HttpURLConnection c = (HttpURLConnection) new URL(url).openConnection();
         c.setConnectTimeout(8000);
         c.setReadTimeout(20000);
         try (InputStream in = c.getInputStream(); FileOutputStream out = new FileOutputStream(part)) {
@@ -744,7 +893,7 @@ final class Recs {
             if (b == null) throw new IOException("unreadable image");
             AppLog.w("backdrop \u201c" + p.title + "\u201d: " + bounds.outWidth + "×" + bounds.outHeight + " → " + Backdrop.W + "×" + Backdrop.H);
             boolean forLight = light;
-            Backdrop backdrop = Backdrop.make(b, forLight);
+            Backdrop backdrop = Backdrop.make(b, forLight, forLight ? poster(p) : null);
             if (forLight != light) return;   // the design changed midway: this one is stale
             synchronized (images) {
                 images.put(p.backdrop, backdrop);
@@ -776,9 +925,9 @@ final class Recs {
             if (parts[i].lastModified() < stale) parts[i].delete();
         }
         File[] files = dir.listFiles((d, name) -> !name.endsWith(".part"));
-        if (files == null || files.length <= 24) return;
+        if (files == null || files.length <= 48) return;   // 24 photos and their posters
         Arrays.sort(files, (a, b) -> Long.compare(a.lastModified(), b.lastModified()));
-        for (int i = 0; i < files.length - 24; i++) {
+        for (int i = 0; i < files.length - 48; i++) {
             //noinspection ResultOfMethodCallIgnored
             files[i].delete();
         }
@@ -791,6 +940,7 @@ final class Recs {
             JSONArray a = new JSONArray();
             for (Pick p : picks) {
                 a.put(new JSONObject().put("id", p.id).put("kind", p.kind).put("title", p.title).put("backdrop", p.backdrop).put("link", p.link == null ? "" : p.link)
+                        .put("poster", p.poster == null ? "" : p.poster)
                         .put("meta", p.meta).put("app", p.app == null ? "" : p.app).put("pkg", p.pkg == null ? "" : p.pkg)
                         .put("detailed", p.detailed));
             }
@@ -816,6 +966,7 @@ final class Recs {
             p.kind = o.optString("kind");
             p.title = o.optString("title");
             p.backdrop = o.optString("backdrop");
+            p.poster = o.optString("poster").isEmpty() ? null : o.optString("poster");
             p.link = o.optString("link").isEmpty() ? null : o.optString("link");
             p.meta = o.optString("meta");
             p.app = o.optString("app").isEmpty() ? null : o.optString("app");

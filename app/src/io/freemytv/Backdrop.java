@@ -63,6 +63,11 @@ final class Backdrop {
     }
 
     static Backdrop make(Bitmap src, boolean forLight) {
+        return make(src, forLight, null);
+    }
+
+    /** poster: the title's vertical poster, for the tall cards (local change; null = the photo's middle, as before). */
+    static Backdrop make(Bitmap src, boolean forLight, Bitmap poster) {
         Bitmap out = Bitmap.createBitmap(W, H, Bitmap.Config.ARGB_8888);
         Canvas c = new Canvas(out);
         Paint photo = new Paint(Paint.FILTER_BITMAP_FLAG | Paint.DITHER_FLAG);
@@ -72,7 +77,8 @@ final class Backdrop {
         src.recycle();
         if (forLight) {
             // Light design: everything comes from the photo without scrims.
-            Bitmap wide = card(out, WIDE_W, WIDE_H), tall = card(out, TALL_W, TALL_H);
+            Bitmap wide = card(out, WIDE_W, WIDE_H), tall = card(poster != null ? poster : out, TALL_W, TALL_H);
+            if (poster != null) poster.recycle();
             int[] frost = reduce(out, FW, FH, 3, 3);
             int[] light = whiten(frost.clone(), 0.82f);
             int[] glass = reduce(out, GW, GH, 2, 2);
@@ -105,6 +111,7 @@ final class Backdrop {
                 new float[] {0, 0.5f, 1}, Shader.TileMode.CLAMP));
         c.drawRect(0, 0, W, H * 0.24f, scrim);
 
+        if (poster != null) poster.recycle();
         int[] frost = reduce(out, FW, FH, 3, 3);
         int[] glass = reduce(out, GW, GH, 2, 2);
         return new Backdrop(gpu(out), frost, glass, null, null, null, null, null, null);

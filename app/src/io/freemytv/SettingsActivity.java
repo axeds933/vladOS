@@ -38,9 +38,9 @@ import java.util.Locale;
 import java.util.Set;
 
 /**
- * Free My TV's settings (the app's icon, "All Apps", or the gear on the home screen), in the style of Apple TV's
+ * vladOS's settings (the app's icon, "All Apps", or the gear on the home screen), in the style of Apple TV's
  * settings: the big symbol and title on the left, the list on the right with the focused row in white. "Home screen"
- * opens the Free My TV / Original choice (with a check on the current one); the switch runs in the main process
+ * opens the vladOS / Original choice (with a check on the current one); the switch runs in the main process
  * (HomeMode) and this screen only asks for it and follows the state file.
  */
 public class SettingsActivity extends Activity {
@@ -181,7 +181,7 @@ public class SettingsActivity extends Activity {
             scene.setMotion(0.5f, 0.2f);
             scene.applyPalette();
             setFocusable(true);
-            setContentDescription("Free My TV");
+            setContentDescription("vladOS");
             // TalkBack: one item per row, id = row + 1.
             spoken = new Spoken(this, new Spoken.Source() {
                 @Override public void items(List<Integer> out) { for (int i = 1; i <= rowCount(); i++) out.add(i); }
@@ -211,7 +211,7 @@ public class SettingsActivity extends Activity {
                     if (row == 0) {
                         String busyText = busyText();
                         String value = busy() ? (busyText.isEmpty() ? Ui.tr("Starting…") : busyText)
-                                : freeActive() ? "Free My TV" : Ui.tr("Original");
+                                : freeActive() ? "vladOS" : Ui.tr("Original");
                         return Ui.trf("Home Screen, {mode}", "mode", value);
                     }
                     String[] names = {Ui.tr("Screensaver, preview"), Ui.tr("Home Settings"),
@@ -219,7 +219,7 @@ public class SettingsActivity extends Activity {
                     return row - 1 < names.length ? names[row - 1] : "";
                 }
                 case HOME_CHOICE: {
-                    String name = row == 0 ? "Free My TV, " + Ui.tr("no ads, with the new screensaver")
+                    String name = row == 0 ? "vladOS, " + Ui.tr("no ads, with the new screensaver")
                             : "Original, " + Ui.tr("the TV's factory home screen");
                     boolean inUse = (row == 0) == freeActive();
                     return name + (inUse ? Ui.tr(". In use") : "") + ", " + Ui.trf("{i} of {n}", "i", row + 1, "n", 2);
@@ -370,7 +370,7 @@ public class SettingsActivity extends Activity {
             // On the left: big symbol, title, description.
             float cx = 500 * k;
             Symbols.draw(getContext(), c, "sparkles", cx, 400 * k, 150 * k, 0xEBFFFFFF);
-            c.drawText("Free My TV", cx, 612 * k, title);
+            c.drawText("vladOS", cx, 612 * k, title);
             c.drawText(Ui.tr("Your TV's home screen and screensaver"), cx, 660 * k, subtitle);
             c.drawText(versionName(getContext()), cx, 704 * k, version);
 
@@ -380,7 +380,7 @@ public class SettingsActivity extends Activity {
         private void drawMain(Canvas c, float seconds) {
             boolean working = busy();
             String busyText = busyText();
-            String mode = freeActive() ? "Free My TV" : Ui.tr("Original");
+            String mode = freeActive() ? "vladOS" : Ui.tr("Original");
             String[] labels = {Ui.tr("Home Screen"), Ui.tr("Screensaver"),
                     Ui.tr("Home Settings"), Ui.tr("Shelf"), Ui.tr("Top Buttons"),
                     Ui.tr("Remote Buttons"), Ui.tr("TV Settings")};
@@ -446,13 +446,16 @@ public class SettingsActivity extends Activity {
             int count = recs.optInt("count");
             if (!hasKey) line = Ui.tr("No TMDB key: see the README (config.properties).");
             else if (error.equals(Recs.NO_KNOWN_APPS)) line = Ui.tr("None of the TV's streaming apps can give picks.");
+            else if (error.equals(Recs.NO_APPS) && Recs.kinopoisk()) line = "Кинопоиск не нашёл фильмов в приложениях этого телевизора.";
             else if (error.equals(Recs.NO_APPS)) line = Ui.trf("TMDB has none of the TV's apps for tmdb_region={region}.", "region", Recs.REGION);
             else if (!error.isEmpty()) line = Ui.trf("Error: {error}.", "error", error);
             else if (count > 0) line = Ui.trf("On · {n} titles from the TV's apps, 3 new ones every hour.", "n", count);
             else line = Ui.tr("Fetching titles…");
             c.drawText(TextUtils.ellipsize(line, notice, 790 * k, TextUtils.TruncateAt.END).toString(), x, y + 42 * k, notice);
             version.setTextAlign(Paint.Align.LEFT);
-            c.drawText(Ui.tr("This product uses the TMDB API but is not endorsed or certified by TMDB."), x, y + 78 * k, version);
+            // Local change: the picks come from Kinopoisk when its key is set
+            c.drawText(Recs.kinopoisk() ? "Подборки: Кинопоиск (poiskkino.dev)."
+                    : Ui.tr("This product uses the TMDB API but is not endorsed or certified by TMDB."), x, y + 78 * k, version);
             if (!Config.WATCHMODE_KEY.trim().isEmpty()) {
                 c.drawText(Ui.tr("Links to the titles by Watchmode."), x, y + 108 * k, version);
             }
@@ -484,7 +487,7 @@ public class SettingsActivity extends Activity {
             c.drawText(Ui.tr("COMPARISON"), x, y, header);
             cellValue.setColor(0x73FFFFFF);
             c.drawText(Ui.tr("Original"), colA, y, cellValue);
-            c.drawText("Free My TV", colB, y, cellValue);
+            c.drawText("vladOS", colB, y, cellValue);
             cellValue.setColor(0xD9FFFFFF);
             JSONObject metrics = state.optJSONObject("metrics");
             JSONObject a = metrics == null ? null : metrics.optJSONObject(HomeMode.ORIGINAL);
@@ -515,11 +518,11 @@ public class SettingsActivity extends Activity {
             if (shown == 0) c.drawText(Ui.tr("None yet."), x, y + 42 * k, notice);
         }
 
-        /** Home screen choice: Free My TV or the original, with a check on the one in use. */
+        /** Home screen choice: vladOS or the original, with a check on the one in use. */
         private void drawChoice(Canvas c) {
             Paint heading = Ui.text(Ui.displaySemibold, 34 * k, 0xFFFFFFFF);
             c.drawText(Ui.tr("Home Screen"), LIST_X * k + 30 * k, (LIST_TOP - 24) * k, heading);
-            String[][] options = {{"Free My TV", Ui.tr("No ads, with the new screensaver")},
+            String[][] options = {{"vladOS", Ui.tr("No ads, with the new screensaver")},
                     {Ui.tr("Original"), Ui.tr("The TV's factory home screen")}};
             int current = freeActive() ? 0 : 1;
             for (int i = 0; i < 2; i++) {
@@ -565,9 +568,9 @@ public class SettingsActivity extends Activity {
 
         private static String versionName(Context c) {
             try {
-                return "Free My TV " + c.getPackageManager().getPackageInfo(c.getPackageName(), 0).versionName;
+                return "vladOS " + c.getPackageManager().getPackageInfo(c.getPackageName(), 0).versionName;
             } catch (android.content.pm.PackageManager.NameNotFoundException e) {
-                return "Free My TV";
+                return "vladOS";
             }
         }
 
@@ -640,10 +643,6 @@ public class SettingsActivity extends Activity {
         /** Home Settings: language, temperature, theme, sounds, weather, city, quotes, then one row per coin. */
         private static final int CITY_ROW = 5, COIN_ROWS = 7;
 
-        private boolean dollar() {
-            return "BRL".equalsIgnoreCase(Config.CURRENCY.trim());
-        }
-
         private String[] settingLabels() {
             List<String> l = new ArrayList<>();
             l.add(Ui.tr("Language"));
@@ -653,10 +652,8 @@ public class SettingsActivity extends Activity {
             l.add(Ui.tr("Weather widget"));
             l.add(Ui.tr("City"));
             l.add(Ui.tr("Quotes widget"));
-            l.add("Bitcoin");
-            l.add("Ethereum");
-            l.add("Solana");
-            if (dollar()) l.add(Ui.tr("Dollar"));
+            // Local change: rates and MOEX instead of crypto, in the 4 places of the home screen (OK / ◀ ▶ change them)
+            for (int j = 1; j <= HomeData.MAX_SHOWN; j++) l.add("Позиция " + j);
             return l.toArray(new String[0]);
         }
 
@@ -674,7 +671,10 @@ public class SettingsActivity extends Activity {
             v[CITY_ROW] = !cityStatus.isEmpty() ? cityStatus : Prefs.city().isEmpty() ? "—" : Prefs.city();
             v[6] = onOff(Prefs.quotes());
             // No quotes widget, nowhere to show prices: the coins read as off (and stay locked) until it is back on.
-            for (int i = COIN_ROWS; i < v.length; i++) v[i] = onOff(Prefs.quotes() && Prefs.coin(i - COIN_ROWS));
+            for (int i = COIN_ROWS; i < v.length; i++) {
+                int coin = Prefs.slot(i - COIN_ROWS);
+                v[i] = !Prefs.quotes() ? onOff(false) : coin < 0 ? "Выкл" : HomeData.COIN_NAMES[coin];
+            }
             return v;
         }
 
@@ -756,7 +756,9 @@ public class SettingsActivity extends Activity {
                 case 6: Prefs.setQuotes(!Prefs.quotes()); break;
                 default:
                     if (!Prefs.quotes()) return;
-                    Prefs.setCoin(focus - COIN_ROWS, !Prefs.coin(focus - COIN_ROWS));
+                    // Through every quote and then "off" (-1), and around again
+                    int n = HomeData.COINS.length + 1, at = Prefs.slot(focus - COIN_ROWS) + 1;
+                    Prefs.setSlot(focus - COIN_ROWS, (at + dir + n) % n - 1);
                     break;
             }
             HomeData.get(getContext()).settingsChanged();

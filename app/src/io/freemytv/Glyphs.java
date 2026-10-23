@@ -44,17 +44,33 @@ final class Glyphs {
         int slot = slot(coin), key = slot << 16 | frame;
         synchronized (BITMAPS) {
             if (BITMAPS.indexOfKey(key) >= 0) return BITMAPS.get(key);
-            Drawable d = context.getDrawable(IDS[slot]);
             Bitmap b = null;
-            if (d != null) {
-                Bitmap full = Bitmap.createBitmap(frame, frame, Bitmap.Config.ARGB_8888);
-                d.setBounds(0, 0, frame, frame);
-                d.draw(new Canvas(full));
-                b = trimSides(full).extractAlpha();
+            if (slot >= TEXT) {
+                b = text(LABELS[slot - TEXT], frame);
+            } else {
+                Drawable d = context.getDrawable(IDS[slot]);
+                if (d != null) {
+                    Bitmap full = Bitmap.createBitmap(frame, frame, Bitmap.Config.ARGB_8888);
+                    d.setBounds(0, 0, frame, frame);
+                    d.draw(new Canvas(full));
+                    b = trimSides(full).extractAlpha();
+                }
             }
             BITMAPS.put(key, b);
             return b;
         }
+    }
+
+    /** Local change: currencies and tickers have no logo here; their sign or short name, drawn the same way. */
+    private static Bitmap text(String label, int frame) {
+        Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+        p.setTypeface(android.graphics.Typeface.DEFAULT_BOLD);
+        p.setTextSize(frame * (label.length() == 1 ? 0.62f : 0.56f));
+        int w = Math.max(1, (int) Math.ceil(p.measureText(label)) + 2);
+        Bitmap full = Bitmap.createBitmap(w, frame, Bitmap.Config.ARGB_8888);
+        Paint.FontMetrics m = p.getFontMetrics();
+        new Canvas(full).drawText(label, 1, frame / 2f - (m.ascent + m.descent) / 2, p);
+        return trimSides(full).extractAlpha();
     }
 
     /** Trims only the empty columns on the sides (the frame height stays, so all coins center on the same line). */
@@ -77,12 +93,19 @@ final class Glyphs {
 
     private static final int[] IDS = {R.drawable.coin_btc, R.drawable.coin_eth, R.drawable.coin_sol, R.drawable.coin_usdt};
 
+    private static final int TEXT = 4;
+    private static final String[] CODES = {"USD", "EUR", "CNY", "IMOEX", "SBER", "GAZP", "LKOH", "YDEX"};
+    private static final String[] LABELS = {"$", "€", "¥", "MOEX", "SBER", "GAZP", "LKOH", "YDEX"};
+
     private static int slot(String coin) {
         switch (coin) {
             case "BTC": return 0;
             case "ETH": return 1;
             case "SOL": return 2;
-            default: return 3;
+            case "USDT": return 3;
+            default:
+                int i = java.util.Arrays.asList(CODES).indexOf(coin);
+                return i < 0 ? 3 : TEXT + i;
         }
     }
 }

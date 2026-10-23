@@ -385,7 +385,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             v.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);   // TalkBack reads the items (Spoken)
             addView(v);
         }
-        setContentDescription("Free My TV");
+        setContentDescription("vladOS");
         drawerLayer.setVisibility(INVISIBLE);
         for (int i = 0; i < topFocus.length; i++) {
             topFocus[i] = new Spring(0.26f, 0.85f, 0);
@@ -1639,7 +1639,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
             String stale = HomeData.staleness(data.pricesAt, 5 * 60_000L);
             staleText = stale.isEmpty() ? Ui.tr("24h change") : Ui.trf("quotes|{ago}", "ago", stale);
             for (int i = 0; i < HomeData.COINS.length; i++) {
-                priceText[i] = HomeData.brl(data.prices[i]);
+                priceText[i] = HomeData.quoteText(i, data.prices[i]);
                 changeText[i] = HomeData.change(data.changes[i]);
             }
         }
@@ -1699,7 +1699,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     private void drawPrices(Canvas c, RectF r) {
         float x = r.left + 34 * k, right = r.right - 34 * k;
         refreshDrawerText();
-        c.drawText(Ui.tr("Crypto"), x, r.top + 54 * k, cardTitle);
+        c.drawText("Курсы", x, r.top + 54 * k, cardTitle);
         c.drawText(staleText, right, r.top + 54 * k, cardDimRight);
         float cap = Ui.cap(cardText);
         int[] coins = HomeData.active();
@@ -2304,7 +2304,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
                 text = Ui.trf("Removed from the shelf: {app}", "app", it.label);
             } else {
                 if (shown >= HomeApps.MAX_SHELF) {
-                    handler.post(() -> showToast(Ui.tr("The shelf is full. Make room in Free My TV › Shelf.")));
+                    handler.post(() -> showToast(Ui.tr("The shelf is full. Make room in vladOS › Shelf.")));
                     return;
                 }
                 list.add(it.pkg);
@@ -2707,7 +2707,7 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         String stale = HomeData.staleness(data.pricesAt, 5 * 60_000L);
         s.append(", ").append(stale.isEmpty() ? Ui.tr("24h change") : Ui.trf("quotes|{ago}", "ago", stale)).append('.');
         for (int i : HomeData.active()) {
-            s.append(' ').append(HomeData.coinName(i)).append(' ').append(HomeData.brl(data.prices[i]));
+            s.append(' ').append(HomeData.coinName(i)).append(' ').append(HomeData.quoteText(i, data.prices[i]));
             if (!Double.isNaN(data.changes[i])) s.append(", ").append(HomeData.change(data.changes[i]));
             s.append('.');
         }
@@ -2927,11 +2927,43 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
         }
         if (p == null) return;
         fitPaint.set(lCardTitle);
+        if (i != 0 && fitPaint.measureText(p.title) > bw) {
+            // Local change: the tall cards are narrow, so a long title takes two lines (the wide card's meta row)
+            String[] lines = twoLines(p.title, fitPaint, bw);
+            c.drawText(lines[0], base.left, base.bottom + 46 * k, lCardTitle);
+            c.drawText(lines[1], base.left, base.bottom + 82 * k, lCardTitle);
+            return;
+        }
         c.drawText(TextUtils.ellipsize(p.title, fitPaint, bw, TextUtils.TruncateAt.END).toString(), base.left, base.bottom + 46 * k, lCardTitle);
         if (i == 0 && p.meta != null && !p.meta.isEmpty()) {
             fitPaint.set(lCardMeta);
             c.drawText(TextUtils.ellipsize(p.meta, fitPaint, bw, TextUtils.TruncateAt.END).toString(), base.left, base.bottom + 80 * k, lCardMeta);
         }
+    }
+
+    /** As many whole words as fit on the first line, the rest on the second (cut with "…" if it's still too long). */
+    private static String[] twoLines(String title, android.text.TextPaint paint, float width) {
+        String[] words = title.split(" ");
+        StringBuilder first = new StringBuilder();
+        int w = 0;
+        while (w < words.length) {
+            String next = first.length() == 0 ? words[w] : first + " " + words[w];
+            if (paint.measureText(next) > width && first.length() > 0) break;
+            first.setLength(0);
+            first.append(next);
+            w++;
+        }
+        // A preposition or conjunction ("в", "и", "на") goes down with the word it belongs to.
+        if (w < words.length && w > 1 && words[w - 1].length() <= 2) {
+            w--;
+            first.setLength(first.length() - words[w].length() - 1);
+        }
+        StringBuilder rest = new StringBuilder();
+        for (; w < words.length; w++) rest.append(rest.length() == 0 ? "" : " ").append(words[w]);
+        return new String[] {
+            TextUtils.ellipsize(first, paint, width, TextUtils.TruncateAt.END).toString(),   // one word longer than the card
+            TextUtils.ellipsize(rest, paint, width, TextUtils.TruncateAt.END).toString()
+        };
     }
 
     /**
