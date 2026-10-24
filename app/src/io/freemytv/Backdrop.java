@@ -38,28 +38,56 @@ final class Backdrop {
     private static int ui(int px) {
         return Math.round(px * UI_SCALE);
     }
+    /**
+     * Local change: Android 13+ only. Before that there's no AGSL, the glass is a flat fill and Scene reads neither the
+     * frosted nor the glass pixels, so they aren't kept at all (about 1.3 MB less per cached photo).
+     */
+    static final boolean SHADERS = android.os.Build.VERSION.SDK_INT >= 33;
     final Bitmap image;
-    final int[] frost;      // heavily blurred (frosted glass, bottom drawer)
-    final int[] glass;      // lightly blurred (Liquid Glass: the photo shows through the glass)
+    final int[] frost;      // heavily blurred (frosted glass, bottom drawer); light design with SHADERS only
+    private final int[] glass;          // lightly blurred (Liquid Glass); the day and night versions come from it
     final Bitmap wide, tall;            // the photo on the cards
-    final int[] light, lightGlass;      // by day: the frosted and glass versions, lightened
     final Bitmap lightImage;            // by day: the background (the lightened frosted version, scaled up on screen)
-    final int[] nightFrost, nightGlass; // at night: frosted (the bottom drawer's frosted glass) and glass, darkened
     final Bitmap nightImage;            // at night: the background (the darkened frosted version)
+    // By day the glass lightened, at night the glass and the frosted version darkened: made from `glass` and `frost`
+    // when asked, and kept only for the last few backdrops asked (see derive).
+    private int[] lightGlass, nightGlass, nightFrost;
 
-    private Backdrop(Bitmap image, int[] frost, int[] glass, Bitmap wide, Bitmap tall, int[] light, int[] lightGlass,
-                     int[] night, int[] nightGlass) {
+    private Backdrop(Bitmap image, int[] frost, int[] glass, Bitmap wide, Bitmap tall, Bitmap lightImage, Bitmap nightImage) {
         this.image = image;
         this.frost = frost;
         this.glass = glass;
         this.wide = wide;
         this.tall = tall;
-        this.light = light;
-        this.lightGlass = lightGlass;
-        this.nightFrost = night;
-        this.nightGlass = nightGlass;
-        lightImage = light == null ? null : Bitmap.createBitmap(light, FW, FH, Bitmap.Config.ARGB_8888);
-        nightImage = night == null ? null : Bitmap.createBitmap(night, FW, FH, Bitmap.Config.ARGB_8888);
+        this.lightImage = lightImage;
+        this.nightImage = nightImage;
+    }
+
+    int[] lightGlass() { derive(); return lightGlass; }
+    int[] nightGlass() { derive(); return nightGlass; }
+    int[] nightFrost() { derive(); return nightFrost; }
+
+    /** The backdrops whose day and night versions exist: the background, the one fading in, and one more. UI thread. */
+    private static final java.util.ArrayDeque<Backdrop> DERIVED = new java.util.ArrayDeque<>();
+
+    /**
+     * The same pixels the constructor used to make for every cached photo (10 in the light design, ~1 MB each), made
+     * for the ones on screen instead: a few ms once per new background.
+     */
+    private void derive() {
+        if (glass == null) return;
+        if (lightGlass == null) {
+            lightGlass = whiten(glass.clone(), 0.74f);
+            nightGlass = darken(glass.clone(), 0.56f);
+            nightFrost = darken(frost.clone(), 0.76f);
+        }
+        if (DERIVED.peekFirst() == this) return;
+        DERIVED.remove(this);
+        DERIVED.addFirst(this);
+        while (DERIVED.size() > 3) {
+            Backdrop old = DERIVED.removeLast();
+            old.lightGlass = old.nightGlass = old.nightFrost = null;
+        }
     }
 
     static Backdrop make(Bitmap src, boolean forLight) {
@@ -80,13 +108,11 @@ final class Backdrop {
             Bitmap wide = card(out, WIDE_W, WIDE_H), tall = card(poster != null ? poster : out, TALL_W, TALL_H);
             if (poster != null) poster.recycle();
             int[] frost = reduce(out, FW, FH, 3, 3);
-            int[] light = whiten(frost.clone(), 0.82f);
-            int[] glass = reduce(out, GW, GH, 2, 2);
-            int[] lightGlass = whiten(glass.clone(), 0.74f);
-            int[] night = darken(frost.clone(), 0.76f);
-            int[] nightGlass = darken(glass, 0.56f);
+            Bitmap lightImage = Bitmap.createBitmap(whiten(frost.clone(), 0.82f), FW, FH, Bitmap.Config.ARGB_8888);
+            Bitmap nightImage = Bitmap.createBitmap(darken(frost.clone(), 0.76f), FW, FH, Bitmap.Config.ARGB_8888);
+            int[] glass = SHADERS ? reduce(out, GW, GH, 2, 2) : null;
             out.recycle();
-            return new Backdrop(null, frost, null, wide, tall, light, lightGlass, night, nightGlass);
+            return new Backdrop(null, SHADERS ? frost : null, glass, wide, tall, lightImage, nightImage);
         }
 
         float boost = Math.max(0, Math.min(0.3f, (luminance(out, 0, 0.22f, 0.5f, 0.62f) - 0.22f) * 1.1f));
@@ -113,8 +139,8 @@ final class Backdrop {
 
         if (poster != null) poster.recycle();
         int[] frost = reduce(out, FW, FH, 3, 3);
-        int[] glass = reduce(out, GW, GH, 2, 2);
-        return new Backdrop(gpu(out), frost, glass, null, null, null, null, null, null);
+        // The photo design never hands its glass to Scene (no day/night versions): not made (local change)
+        return new Backdrop(gpu(out), frost, null, null, null, null, null);
     }
 
     /** How many times smaller the screensaver photo's frosted version is (the glass math uses the same number). */

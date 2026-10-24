@@ -132,8 +132,10 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
     private boolean nightTarget;
     private float night, nightFrom;     // 0 = day, 1 = night
     private long nightAt;
-    private final int[] glassNight = new int[Backdrop.GW * Backdrop.GH], frostNight = new int[Backdrop.FW * Backdrop.FH];
-    private final int[] neutralGlassPx = new int[Backdrop.GW * Backdrop.GH], neutralFrostPx = new int[Backdrop.FW * Backdrop.FH];
+    // Local change: only with shaders (Android 13+); before that Scene reads none of these, so they stay empty.
+    private static final int GLASS_PX = Backdrop.SHADERS ? Backdrop.GW * Backdrop.GH : 0, FROST_PX = Backdrop.SHADERS ? Backdrop.FW * Backdrop.FH : 0;
+    private final int[] glassNight = new int[GLASS_PX], frostNight = new int[FROST_PX];
+    private final int[] neutralGlassPx = new int[GLASS_PX], neutralFrostPx = new int[FROST_PX];
     private boolean nightPair;          // the glass holds both photos (day and night), blended by `night`
     private Shader nightGradient;
 
@@ -865,11 +867,12 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
 
     /** What the glass shows: the photo lightened (by day), darkened (at night) or blended in between. */
     private int[] glassOf(Backdrop b) {
-        if (b.nightGlass == null || night <= 0.001f) return b.lightGlass;
-        if (night >= 0.999f) return b.nightGlass;
+        if (b.nightGlass() == null || night <= 0.001f) return b.lightGlass();
+        if (night >= 0.999f) return b.nightGlass();
         // During the transition, the blend (only for the current background; a photo fading in uses the nearer side).
-        if (b != bgTo) return night < 0.5f ? b.lightGlass : b.nightGlass;
-        for (int i = 0; i < glassNight.length; i++) glassNight[i] = mix(b.lightGlass[i], b.nightGlass[i], night);
+        if (b != bgTo) return night < 0.5f ? b.lightGlass() : b.nightGlass();
+        int[] day = b.lightGlass(), dark = b.nightGlass();
+        for (int i = 0; i < glassNight.length; i++) glassNight[i] = mix(day[i], dark[i], night);
         return glassNight;
     }
 
@@ -885,10 +888,11 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
 
     /** What the frosted glass shows (drawer, toasts): the blurred photo, darkened at night. */
     private int[] frostOf(Backdrop b) {
-        if (b.nightFrost == null || night <= 0.001f) return b.frost;
-        if (night >= 0.999f) return b.nightFrost;
-        if (b != bgTo) return night < 0.5f ? b.frost : b.nightFrost;
-        for (int i = 0; i < frostNight.length; i++) frostNight[i] = mix(b.frost[i], b.nightFrost[i], night);
+        if (b.nightFrost() == null || night <= 0.001f) return b.frost;
+        if (night >= 0.999f) return b.nightFrost();
+        if (b != bgTo) return night < 0.5f ? b.frost : b.nightFrost();
+        int[] dark = b.nightFrost();
+        for (int i = 0; i < frostNight.length; i++) frostNight[i] = mix(b.frost[i], dark[i], night);
         return frostNight;
     }
 
@@ -924,11 +928,11 @@ final class HomeView extends ViewGroup implements Choreographer.FrameCallback, H
 
     /** Redraws for the current night value (the glass now reads the lightened, blended or darkened photo). */
     private void nightChanged() {
-        if (bgFadeAt == 0 && bgTo != null && bgTo.lightGlass != null) {
+        if (bgFadeAt == 0 && bgTo != null && bgTo.lightGlass() != null) {
             scene.setFrost(frostOf(bgTo));
-            if (nightAt != 0 && bgTo.nightGlass != null) {
+            if (nightAt != 0 && bgTo.nightGlass() != null) {
                 if (!nightPair) {
-                    scene.setGlassImages(bgTo.lightGlass, bgTo.nightGlass);
+                    scene.setGlassImages(bgTo.lightGlass(), bgTo.nightGlass());
                     nightPair = true;
                 }
                 scene.setGlassMix(night);
